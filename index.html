@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR English Speaking Game for Kids</title>
+    
+    <!-- Google Fonts: Mitr -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Mitr', 'sans-serif'],
+                    },
+                    colors: {
+                        'pastel-pink': '#FFD1DC',
+                        'pastel-orange': '#FFDFBA',
+                        'pastel-blue': '#BAE1FF',
+                        'glass-bg': 'rgba(255, 255, 255, 0.4)',
+                        'glass-border': 'rgba(255, 255, 255, 0.6)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- MediaPipe Face Mesh -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <style>
+        body {
+            /* Prevent scrolling and bouncing on mobile */
+            overscroll-behavior: none;
+            /* Pastel Gradient Background */
+            background: linear-gradient(135deg, #FFD1DC 0%, #FFDFBA 100%);
+        }
+        
+        .glass-panel {
+            background: var(--tw-colors-glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid var(--tw-colors-glass-border);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+        }
+
+        /* Mirror video and canvas */
+        .mirror {
+            transform: scaleX(-1);
+        }
+
+        /* Simple pulse animation for speaking state */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+            100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        .speaking-active {
+            animation: pulse-ring 2s infinite;
+        }
+
+        /* Ensure elements don't get selected accidentally */
+        .no-select {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden font-sans text-gray-800 no-select">
+
+    <!-- Main App Container -->
+    <div id="app-container" class="h-full w-full flex flex-col md:flex-row relative">
+        
+        <!-- Left Panel: Game UI -->
+        <div class="w-full md:w-1/2 h-1/2 md:h-full p-4 md:p-8 flex flex-col justify-center items-center relative z-10">
+            <div class="glass-panel w-full max-w-md h-full rounded-3xl p-6 flex flex-col">
+                
+                <!-- Header: Progress & Score -->
+                <div class="flex justify-between items-center mb-6">
+                    <div class="bg-white/60 px-4 py-2 rounded-full font-bold text-pink-600 shadow-sm">
+                        ข้อ: <span id="ui-progress">1/10</span>
+                    </div>
+                    <div class="bg-white/60 px-4 py-2 rounded-full font-bold text-yellow-500 shadow-sm flex items-center">
+                        <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg>
+                        คะแนน: <span id="ui-score">0</span>
+                    </div>
+                </div>
+
+                <!-- Word Display Area -->
+                <div class="flex-grow flex flex-col justify-center items-center text-center">
+                    <h1 id="ui-word-en" class="text-5xl md:text-6xl font-black text-gray-800 drop-shadow-md tracking-wider mb-2">APPLE</h1>
+                    <h2 id="ui-word-th" class="text-2xl md:text-3xl font-medium text-gray-600">แอปเปิ้ล</h2>
+                    
+                    <div id="ui-similarity" class="mt-4 text-lg font-bold transition-opacity duration-300 opacity-0">
+                        ความแม่นยำ: <span id="similarity-value">0%</span>
+                    </div>
+                </div>
+
+                <!-- Status & Microphone Area -->
+                <div class="h-32 flex flex-col justify-end items-center relative">
+                    <div id="ui-status-badge" class="absolute -top-6 bg-blue-500 text-white px-6 py-2 rounded-full font-bold shadow-lg transition-transform duration-300 scale-0 origin-bottom">
+                        เตรียมตัว... 3
+                    </div>
+                    
+                    <!-- Microphone Icon Container -->
+                    <div id="mic-container" class="w-16 h-16 bg-gray-200 rounded-full flex justify-center items-center text-gray-400 transition-colors duration-300">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                    </div>
+                </div>
+
+                <!-- Accuracy Meter -->
+                <div class="w-full bg-gray-200 rounded-full h-4 mt-6 overflow-hidden border border-white/50">
+                    <div id="ui-meter-bar" class="bg-gray-400 h-4 rounded-full transition-all duration-500 w-0"></div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Panel: Camera & AR -->
+        <div class="w-full md:w-1/2 h-1/2 md:h-full relative bg-gray-900 overflow-hidden rounded-t-3xl md:rounded-l-3xl md:rounded-tr-none shadow-2xl">
+            <!-- Video feed (hidden underneath canvas, just used for processing) -->
+            <video id="webcam" class="absolute inset-0 w-full h-full object-cover mirror opacity-0" autoplay playsinline></video>
+            <!-- Canvas for drawing video and AR overlays -->
+            <canvas id="output-canvas" class="absolute inset-0 w-full h-full object-cover mirror"></canvas>
+            
+            <!-- Loading Indicator for Camera -->
+            <div id="camera-loading" class="absolute inset-0 flex flex-col justify-center items-center bg-gray-900/80 z-20" style="display: none;">
+                <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-pink-500 mb-4"></div>
+                <p class="text-white font-semibold animate-pulse">กำลังโหลดกล้องและ AI...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Screen Overlay -->
+    <div id="start-screen" class="fixed inset-0 bg-white/40 backdrop-blur-xl z-50 flex flex-col justify-center items-center transition-opacity duration-500">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-11/12 text-center shadow-2xl border-4 border-pink-200 transform transition-transform scale-100">
+            <h1 class="text-4xl font-black text-pink-500 mb-2">Speak Up AR!</h1>
+            <p class="text-gray-600 mb-6">เกมฝึกพูดภาษาอังกฤษแสนสนุก<br>เปิดกล้องและไมค์เพื่อเริ่มเล่นเลย!</p>
+            <button id="btn-start" class="w-full bg-gradient-to-r from-pink-400 to-orange-400 text-white font-bold py-4 px-8 rounded-full text-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all transform disabled:opacity-50 disabled:cursor-not-allowed">
+                อนุญาตกล้องและเริ่มเกม
+            </button>
+            <p id="start-note" class="text-xs text-gray-400 mt-4">* กรุณาอนุญาตการเข้าถึงกล้องและไมโครโฟน</p>
+        </div>
+    </div>
+
+    <!-- End Screen Overlay -->
+    <div id="end-screen" class="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex flex-col justify-center items-center opacity-0 pointer-events-none transition-opacity duration-500">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-11/12 text-center shadow-2xl border-4 border-yellow-300">
+            <h1 class="text-5xl font-black text-yellow-500 mb-2" id="end-title">ยอดเยี่ยม!</h1>
+            <p class="text-gray-600 text-lg mb-6">คะแนนรวมของคุณคือ</p>
+            <div class="text-7xl font-black text-pink-500 mb-8" id="end-score">8/10</div>
+            <button id="btn-restart" class="w-full bg-gradient-to-r from-blue-400 to-purple-400 text-white font-bold py-4 px-8 rounded-full text-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all transform">
+                เล่นใหม่อีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <!-- Custom Message Box -->
+    <div id="message-box" class="fixed inset-0 bg-black/50 z-[60] flex justify-center items-center opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="bg-white rounded-2xl p-6 max-w-sm w-10/12 text-center shadow-xl">
+            <div id="msg-icon" class="text-4xl mb-4">⚠️</div>
+            <h3 id="msg-title" class="text-xl font-bold mb-2 text-gray-800">แจ้งเตือน</h3>
+            <p id="msg-body" class="text-gray-600 mb-6">ข้อความ</p>
+            <button id="btn-msg-close" class="bg-gray-200 text-gray-800 font-bold py-2 px-6 rounded-full hover:bg-gray-300 transition-colors">ตกลง</button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ---------------------------------------------------------
+         * 1. VOCABULARY DATA
+         * ---------------------------------------------------------
+         */
+        const vocabulary = [
+            { en: "Apple", th: "แอปเปิ้ล" },
+            { en: "Banana", th: "กล้วย" },
+            { en: "Elephant", th: "ช้าง" },
+            { en: "Tiger", th: "เสือ" },
+            { en: "Rainbow", th: "รุ้งกินน้ำ" },
+            { en: "Umbrella", th: "ร่ม" },
+            { en: "Butterfly", th: "ผีเสื้อ" },
+            { en: "Dragon", th: "มังกร" },
+            { en: "Dinosaur", th: "ไดโนเสาร์" },
+            { en: "Astronaut", th: "นักบินอวกาศ" }
+        ];
+
+        /**
+         * ---------------------------------------------------------
+         * 2. STATE MANAGEMENT
+         * ---------------------------------------------------------
+         */
+        const state = {
+            currentQuestion: 0,
+            score: 0,
+            isGameRunning: false,
+            arEffect: 'none', // 'none', 'crown', 'horns'
+            cameraLoaded: false,
+            micPermission: false
+        };
+
+        /**
+         * ---------------------------------------------------------
+         * 3. DOM ELEMENTS
+         * ---------------------------------------------------------
+         */
+        const els = {
+            progress: document.getElementById('ui-progress'),
+            score: document.getElementById('ui-score'),
+            wordEn: document.getElementById('ui-word-en'),
+            wordTh: document.getElementById('ui-word-th'),
+            statusBadge: document.getElementById('ui-status-badge'),
+            micContainer: document.getElementById('mic-container'),
+            meterBar: document.getElementById('ui-meter-bar'),
+            similarityText: document.getElementById('ui-similarity'),
+            similarityValue: document.getElementById('similarity-value'),
+            
+            webcam: document.getElementById('webcam'),
+            canvas: document.getElementById('output-canvas'),
+            cameraLoading: document.getElementById('camera-loading'),
+            
+            startScreen: document.getElementById('start-screen'),
+            btnStart: document.getElementById('btn-start'),
+            
+            endScreen: document.getElementById('end-screen'),
+            endTitle: document.getElementById('end-title'),
+            endScore: document.getElementById('end-score'),
+            btnRestart: document.getElementById('btn-restart'),
+            
+            msgBox: document.getElementById('message-box'),
+            msgTitle: document.getElementById('msg-title'),
+            msgBody: document.getElementById('msg-body'),
+            msgIcon: document.getElementById('msg-icon'),
+            btnMsgClose: document.getElementById('btn-msg-close')
+        };
+
+        const ctx = els.canvas.getContext('2d');
+
+        /**
+         * ---------------------------------------------------------
+         * 4. UTILITY FUNCTIONS
+         * ---------------------------------------------------------
+         */
+        
+        // Custom Alert/Message Box (Replaces window.alert)
+        function showMessage(title, body, icon = '⚠️') {
+            els.msgTitle.innerText = title;
+            els.msgBody.innerText = body;
+            els.msgIcon.innerText = icon;
+            els.msgBox.classList.remove('opacity-0', 'pointer-events-none');
+            
+            // Play click sound if synth is ready
+            audioSynth.playClick();
+        }
+
+        els.btnMsgClose.addEventListener('click', () => {
+            els.msgBox.classList.add('opacity-0', 'pointer-events-none');
+            audioSynth.playClick();
+        });
+
+        // Levenshtein Distance for Similarity Score
+        function getSimilarity(s1, s2) {
+            s1 = s1.toLowerCase().trim();
+            s2 = s2.toLowerCase().trim();
+            
+            // Remove punctuation for kids
+            s1 = s1.replace(/[^\w\s\']|_/g, "").replace(/\s+/g, " ");
+            s2 = s2.replace(/[^\w\s\']|_/g, "").replace(/\s+/g, " ");
+
+            if (s1 === s2) return 100;
+            if (s1.length === 0 || s2.length === 0) return 0;
+
+            const costs = [];
+            for (let i = 0; i <= s1.length; i++) {
+                let lastValue = i;
+                for (let j = 0; j <= s2.length; j++) {
+                    if (i === 0) {
+                        costs[j] = j;
+                    } else {
+                        if (j > 0) {
+                            let newValue = costs[j - 1];
+                            if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+                                newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+                            }
+                            costs[j - 1] = lastValue;
+                            lastValue = newValue;
+                        }
+                    }
+                }
+                if (i > 0) costs[s2.length] = lastValue;
+            }
+            const distance = costs[s2.length];
+            const maxLen = Math.max(s1.length, s2.length);
+            let percent = ((1 - (distance / maxLen)) * 100);
+            
+            // Boost score slightly for kids if it's close
+            if(percent > 60 && percent < 100) percent += 10; 
+            if(percent > 100) percent = 100;
+
+            return Math.round(percent);
+        }
+
+        /**
+         * ---------------------------------------------------------
+         * 5. AUDIO SYNTHESIZER (Web Audio API)
+         * ---------------------------------------------------------
+         */
+        class AudioSynth {
+            constructor() {
+                this.ctx = null; // Initialize on user interaction
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playTone(freq, type = 'sine', duration = 0.1, vol = 0.3) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+
+            playClick() { this.playTone(600, 'sine', 0.1, 0.2); }
+            playTick() { this.playTone(800, 'square', 0.05, 0.1); }
+            playGo() { this.playTone(1200, 'sine', 0.3, 0.3); }
+            
+            playCorrect() {
+                if (!this.ctx) return;
+                // Ping Pong sound
+                this.playTone(880, 'sine', 0.15, 0.3); // A5
+                setTimeout(() => this.playTone(1318.51, 'sine', 0.4, 0.3), 150); // E6
+            }
+            
+            playWrong() {
+                if (!this.ctx) return;
+                // Low buzzer
+                this.playTone(150, 'sawtooth', 0.3, 0.3);
+                setTimeout(() => this.playTone(140, 'sawtooth', 0.4, 0.3), 200);
+            }
+            
+            playWarning() {
+                this.playTone(400, 'triangle', 0.2, 0.3);
+                setTimeout(() => this.playTone(400, 'triangle', 0.2, 0.3), 250);
+            }
+
+            playFanfare() {
+                if (!this.ctx) return;
+                const notes = [
+                    {f: 523.25, d: 0.15}, // C5
+                    {f: 523.25, d: 0.15}, 
+                    {f: 523.25, d: 0.15},
+                    {f: 659.25, d: 0.4},  // E5
+                    {f: 783.99, d: 0.4},  // G5
+                    {f: 1046.50, d: 0.8}  // C6
+                ];
+                let time = 0;
+                notes.forEach(note => {
+                    setTimeout(() => this.playTone(note.f, 'square', note.d, 0.2), time);
+                    time += note.d * 1000 + 50;
+                });
+            }
+
+            playGameOver() {
+                if (!this.ctx) return;
+                const notes = [
+                    {f: 392.00, d: 0.4}, // G4
+                    {f: 349.23, d: 0.4}, // F4
+                    {f: 329.63, d: 0.4}, // E4
+                    {f: 261.63, d: 0.8}  // C4
+                ];
+                let time = 0;
+                notes.forEach(note => {
+                    setTimeout(() => this.playTone(note.f, 'sawtooth', note.d, 0.3), time);
+                    time += note.d * 1000 + 50;
+                });
+            }
+        }
+        const audioSynth = new AudioSynth();
+
+        /**
+         * ---------------------------------------------------------
+         * 6. SPEECH RECOGNITION SETUP
+         * ---------------------------------------------------------
+         */
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition = null;
+        let listenTimeout = null;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                clearTimeout(listenTimeout);
+                const transcript = event.results[0][0].transcript;
+                handleSpeechResult(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                clearTimeout(listenTimeout);
+                if (event.error === 'no-speech') {
+                    handleSpeechResult(""); // Handle as timeout/no sound
+                } else if (event.error === 'not-allowed') {
+                    state.isGameRunning = false;
+                    setMicState('idle');
+                    showMessage('ข้อผิดพลาด', 'ไม่สามารถเข้าถึงไมโครโฟนได้ กรุณาอนุญาตในเบราว์เซอร์ (คลิกไอคอนรูปไมค์บนแถบ URL)', '🎤');
+                } else {
+                    console.error("Speech Error:", event.error);
+                    handleSpeechResult("");
+                }
+            };
+            
+            recognition.onend = () => {
+                // If it ended naturally but we haven't processed a result yet, and we are supposed to be listening
+                if(els.micContainer.classList.contains('speaking-active')) {
+                     // Wait for timeout to handle 'no speech' instead of acting immediately
+                }
+            }
+        } else {
+            showMessage('เบราว์เซอร์ไม่รองรับ', 'เบราว์เซอร์ของคุณไม่รองรับระบบสั่งงานด้วยเสียง แนะนำให้ใช้ Google Chrome', '❌');
+            els.btnStart.disabled = true;
+            els.btnStart.innerText = "ไม่รองรับ";
+        }
+
+        /**
+         * ---------------------------------------------------------
+         * 7. MEDIAPIPE FACE MESH & AR DRAWING
+         * ---------------------------------------------------------
+         */
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        faceMesh.onResults(onARResults);
+
+        // Setup Camera via MediaPipe utility
+        const camera = new Camera(els.webcam, {
+            onFrame: async () => {
+                await faceMesh.send({image: els.webcam});
+            },
+            width: 1280,
+            height: 720
+        });
+
+        // Initialize Camera (called when start button is clicked initially)
+        async function initCamera() {
+            els.cameraLoading.style.display = 'flex';
+            try {
+                await camera.start();
+                state.cameraLoaded = true;
+                els.cameraLoading.style.display = 'none';
+                return true;
+            } catch (err) {
+                console.error("Camera Init Error:", err);
+                els.cameraLoading.style.display = 'none';
+                
+                let errorMsg = 'ไม่สามารถเปิดกล้องได้ กรุณาตรวจสอบการอนุญาต';
+                if (err.name === 'NotAllowedError' || (err.message && err.message.includes('Permission dismissed'))) {
+                    errorMsg = 'คุณปฏิเสธการเข้าถึงกล้อง กรุณาอนุญาตให้เบราว์เซอร์ใช้งานกล้องแล้วคลิกปุ่มลองใหม่';
+                } else if (err.name === 'NotFoundError') {
+                    errorMsg = 'ไม่พบกล้องบนอุปกรณ์ของคุณ';
+                }
+
+                showMessage('ข้อผิดพลาด', errorMsg, '📷');
+                els.btnStart.innerText = "ลองเปิดกล้องอีกครั้ง";
+                els.btnStart.disabled = false;
+                return false;
+            }
+        }
+
+        // Draw AR Overlays
+        function onARResults(results) {
+            // Match canvas size to video size dynamically
+            if (els.canvas.width !== els.webcam.videoWidth) {
+                els.canvas.width = els.webcam.videoWidth;
+                els.canvas.height = els.webcam.videoHeight;
+            }
+
+            ctx.save();
+            ctx.clearRect(0, 0, els.canvas.width, els.canvas.height);
+            
+            // Draw video frame to canvas
+            ctx.drawImage(results.image, 0, 0, els.canvas.width, els.canvas.height);
+
+            // Apply Vignette if wrong answer
+            if (state.arEffect === 'horns') {
+                const gradient = ctx.createRadialGradient(
+                    els.canvas.width/2, els.canvas.height/2, els.canvas.width/4,
+                    els.canvas.width/2, els.canvas.height/2, els.canvas.width/1.2
+                );
+                gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                gradient.addColorStop(1, 'rgba(100,0,0,0.6)'); // Reddish dark vignette
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, els.canvas.width, els.canvas.height);
+            }
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                const w = els.canvas.width;
+                const h = els.canvas.height;
+
+                // Landmarks for top of head calculation
+                // 151 is top of forehead. 10 is higher up. 
+                // Left side of face: 234, Right side: 454
+                const ptTop = landmarks[10]; 
+                const ptLeft = landmarks[234];
+                const ptRight = landmarks[454];
+
+                // Calculate face width and angle for scaling/rotation
+                const faceWidth = Math.sqrt(Math.pow((ptRight.x - ptLeft.x)*w, 2) + Math.pow((ptRight.y - ptLeft.y)*h, 2));
+                const angle = Math.atan2((ptRight.y - ptLeft.y)*h, (ptRight.x - ptLeft.x)*w);
+
+                // Base coordinates for the prop
+                const propX = ptTop.x * w;
+                const propY = ptTop.y * h - (faceWidth * 0.2); // Move slightly above forehead
+
+                if (state.arEffect === 'crown') {
+                    drawCrown(ctx, propX, propY, faceWidth, angle);
+                } else if (state.arEffect === 'horns') {
+                    drawHorns(ctx, landmarks, w, h, faceWidth, angle);
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawCrown(ctx, x, y, faceWidth, angle) {
+            const scale = faceWidth / 150; // Magic number for proportion
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.scale(scale, scale);
+
+            // Draw a simple 2D Crown using paths
+            ctx.beginPath();
+            ctx.moveTo(-50, 0);
+            ctx.lineTo(50, 0);
+            ctx.lineTo(60, -40);
+            ctx.lineTo(25, -20);
+            ctx.lineTo(0, -50);
+            ctx.lineTo(-25, -20);
+            ctx.lineTo(-60, -40);
+            ctx.closePath();
+            
+            // Gold gradient
+            const grd = ctx.createLinearGradient(0, -50, 0, 0);
+            grd.addColorStop(0, "#FFDF00");
+            grd.addColorStop(1, "#DAA520");
+            ctx.fillStyle = grd;
+            ctx.fill();
+            
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#B8860B";
+            ctx.stroke();
+
+            // Jewels
+            ctx.fillStyle = "#FF0000"; // Red center
+            ctx.beginPath(); ctx.arc(0, -25, 6, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "#0000FF"; // Blue sides
+            ctx.beginPath(); ctx.arc(-35, -25, 4, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(35, -25, 4, 0, Math.PI*2); ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawHorns(ctx, landmarks, w, h, faceWidth, angle) {
+            const scale = faceWidth / 200;
+            
+            // Position above eyebrows (landmarks 55 and 285 roughly)
+            const leftBrow = landmarks[55];
+            const rightBrow = landmarks[285];
+
+            // Helper to draw a single horn
+            const drawSingleHorn = (px, py, isLeft) => {
+                ctx.save();
+                ctx.translate(px, py);
+                ctx.rotate(angle);
+                ctx.scale(scale, scale);
+                
+                ctx.beginPath();
+                ctx.moveTo(-10, 0);
+                ctx.lineTo(10, 0);
+                // Curve up and outwards
+                if (isLeft) {
+                    ctx.quadraticCurveTo(0, -50, -30, -70);
+                    ctx.quadraticCurveTo(-15, -30, -10, 0);
+                } else {
+                    ctx.quadraticCurveTo(0, -50, 30, -70);
+                    ctx.quadraticCurveTo(15, -30, 10, 0);
+                }
+                
+                const grd = ctx.createLinearGradient(0, 0, 0, -70);
+                grd.addColorStop(0, "#8B0000"); // Dark red base
+                grd.addColorStop(1, "#FF0000"); // Bright red tip
+                ctx.fillStyle = grd;
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = "#5C0000";
+                ctx.stroke();
+                
+                ctx.restore();
+            };
+
+            drawSingleHorn(leftBrow.x * w, leftBrow.y * h - (faceWidth * 0.1), true);
+            drawSingleHorn(rightBrow.x * w, rightBrow.y * h - (faceWidth * 0.1), false);
+        }
+
+
+        /**
+         * ---------------------------------------------------------
+         * 8. GAME LOGIC & FLOW
+         * ---------------------------------------------------------
+         */
+
+        // Initial setup on load
+        window.onload = () => {
+            // Camera initialization is moved to the start button to ensure 
+            // it is triggered by a user gesture, avoiding auto-dismissal errors.
+        };
+
+        els.btnStart.addEventListener('click', async () => {
+            els.btnStart.disabled = true;
+            els.btnStart.innerText = "กำลังโหลดกล้อง...";
+            
+            if (!state.cameraLoaded) {
+                const cameraReady = await initCamera();
+                if (!cameraReady) return; // Stop if camera permission failed
+            }
+            
+            audioSynth.init(); // Initialize audio context on user gesture
+            audioSynth.playClick();
+            
+            els.startScreen.classList.add('opacity-0', 'pointer-events-none');
+            
+            // Reset state
+            state.score = 0;
+            state.currentQuestion = 0;
+            state.isGameRunning = true;
+            els.score.innerText = state.score;
+            
+            // Start first question after short delay
+            setTimeout(() => {
+                playQuestion();
+            }, 1000);
+        });
+
+        els.btnRestart.addEventListener('click', () => {
+            audioSynth.playClick();
+            els.endScreen.classList.add('opacity-0', 'pointer-events-none');
+            
+            state.score = 0;
+            state.currentQuestion = 0;
+            state.isGameRunning = true;
+            els.score.innerText = state.score;
+            
+            setTimeout(() => {
+                playQuestion();
+            }, 500);
+        });
+
+        function playQuestion() {
+            if (!state.isGameRunning) return;
+            
+            if (state.currentQuestion >= vocabulary.length) {
+                endGame();
+                return;
+            }
+
+            const currentWord = vocabulary[state.currentQuestion];
+            
+            // Reset UI for new question
+            state.arEffect = 'none';
+            els.progress.innerText = `${state.currentQuestion + 1}/${vocabulary.length}`;
+            els.wordEn.innerText = currentWord.en;
+            els.wordTh.innerText = currentWord.th;
+            els.similarityText.classList.add('opacity-0');
+            updateMeter(0, 'gray');
+            
+            setMicState('idle');
+            
+            // Countdown Sequence
+            let count = 3;
+            els.statusBadge.classList.remove('scale-0', 'bg-green-500', 'bg-red-500', 'bg-yellow-500');
+            els.statusBadge.classList.add('bg-blue-500', 'scale-100');
+            
+            const countInterval = setInterval(() => {
+                if (count > 0) {
+                    els.statusBadge.innerText = `เตรียมตัว... ${count}`;
+                    audioSynth.playTick();
+                    count--;
+                } else {
+                    clearInterval(countInterval);
+                    els.statusBadge.innerText = `พูดเลย!`;
+                    els.statusBadge.classList.replace('bg-blue-500', 'bg-green-500');
+                    audioSynth.playGo();
+                    startListening();
+                }
+            }, 1000);
+        }
+
+        function setMicState(stateType) {
+            const mc = els.micContainer;
+            mc.className = "w-16 h-16 rounded-full flex justify-center items-center transition-colors duration-300 ";
+            
+            if (stateType === 'idle') {
+                mc.classList.add('bg-gray-200', 'text-gray-400');
+            } else if (stateType === 'listening') {
+                mc.classList.add('bg-blue-100', 'text-blue-500', 'speaking-active');
+            } else if (stateType === 'correct') {
+                mc.classList.add('bg-green-100', 'text-green-500');
+            } else if (stateType === 'wrong') {
+                mc.classList.add('bg-red-100', 'text-red-500');
+            } else if (stateType === 'warning') {
+                mc.classList.add('bg-yellow-100', 'text-yellow-500');
+            }
+        }
+
+        function updateMeter(percent, type) {
+            const bar = els.meterBar;
+            bar.style.width = `${percent}%`;
+            
+            bar.className = "h-4 rounded-full transition-all duration-500 ";
+            if (type === 'gray') bar.classList.add('bg-gray-400');
+            else if (type === 'green') bar.classList.add('bg-green-500');
+            else if (type === 'red') bar.classList.add('bg-red-500');
+            else if (type === 'yellow') bar.classList.add('bg-yellow-500');
+        }
+
+        function startListening() {
+            setMicState('listening');
+            try {
+                recognition.start();
+                
+                // 5 Second Timeout
+                listenTimeout = setTimeout(() => {
+                    recognition.stop();
+                    handleSpeechResult(""); // Empty means timeout/no sound
+                }, 5000);
+                
+            } catch (e) {
+                console.error(e);
+                handleSpeechResult("");
+            }
+        }
+
+        function handleSpeechResult(transcript) {
+            if(!state.isGameRunning) return; // Prevent double triggers
+            
+            const targetWord = vocabulary[state.currentQuestion].en;
+            
+            els.statusBadge.classList.remove('scale-100');
+            els.statusBadge.classList.add('scale-0');
+
+            if (!transcript || transcript.trim() === "") {
+                // Warning: No Sound
+                audioSynth.playWarning();
+                setMicState('warning');
+                updateMeter(0, 'yellow');
+                
+                els.similarityValue.innerText = "ไม่ได้ยินเสียง ลองอีกครั้ง";
+                els.similarityValue.className = "text-yellow-600";
+                els.similarityText.classList.remove('opacity-0');
+                
+                // Retry same question
+                setTimeout(() => {
+                    playQuestion();
+                }, 3000);
+                return;
+            }
+
+            // Calculate similarity
+            const simScore = getSimilarity(transcript, targetWord);
+            
+            els.similarityValue.innerText = `${simScore}% (คุณพูด: "${transcript}")`;
+            els.similarityText.classList.remove('opacity-0');
+
+            if (simScore >= 80) {
+                // Correct
+                audioSynth.playCorrect();
+                setMicState('correct');
+                updateMeter(simScore, 'green');
+                els.similarityValue.className = "text-green-600";
+                
+                state.score += 1;
+                els.score.innerText = state.score;
+                
+                // AR Effect: Crown & Confetti
+                state.arEffect = 'crown';
+                triggerConfetti();
+                
+                nextQuestionSequence();
+
+            } else {
+                // Wrong
+                audioSynth.playWrong();
+                setMicState('wrong');
+                updateMeter(simScore, 'red');
+                els.similarityValue.className = "text-red-600";
+                
+                // AR Effect: Horns
+                state.arEffect = 'horns';
+                
+                nextQuestionSequence();
+            }
+        }
+
+        function nextQuestionSequence() {
+            // Hold result for 3 seconds, then next question
+            setTimeout(() => {
+                state.currentQuestion++;
+                playQuestion();
+            }, 3000);
+        }
+
+        function triggerConfetti() {
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#FFD1DC', '#FFDFBA', '#BAE1FF', '#FFDF00']
+            });
+        }
+
+        function endGame() {
+            state.isGameRunning = false;
+            state.arEffect = 'none'; // Clear AR
+            
+            els.endScore.innerText = `${state.score}/${vocabulary.length}`;
+            
+            if (state.score >= 8) {
+                els.endTitle.innerText = "ยอดเยี่ยมมาก!";
+                els.endTitle.className = "text-5xl font-black text-green-500 mb-2";
+                audioSynth.playFanfare();
+                // Lots of confetti
+                const duration = 3000;
+                const end = Date.now() + duration;
+                (function frame() {
+                    confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 }, colors: ['#FFD1DC', '#BAE1FF'] });
+                    confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 }, colors: ['#FFDFBA', '#FFDF00'] });
+                    if (Date.now() < end) requestAnimationFrame(frame);
+                }());
+            } else if (state.score >= 5) {
+                els.endTitle.innerText = "เก่งมาก พยายามอีกนิด!";
+                els.endTitle.className = "text-5xl font-black text-yellow-500 mb-2";
+                audioSynth.playFanfare(); // Short fanfare
+            } else {
+                els.endTitle.innerText = "สู้ๆ ลองใหม่อีกครั้งนะ!";
+                els.endTitle.className = "text-5xl font-black text-red-500 mb-2";
+                audioSynth.playGameOver();
+            }
+
+            els.endScreen.classList.remove('opacity-0', 'pointer-events-none');
+        }
+
+    </script>
+</body>
+</html>
